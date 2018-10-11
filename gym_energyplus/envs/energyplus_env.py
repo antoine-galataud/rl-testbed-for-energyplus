@@ -200,7 +200,7 @@ class EnergyPlusEnv(Env):
         self.ep_model.set_raw_state(raw_state)
         observation = self.ep_model.get_state()
         reward = self.ep_model.compute_reward()
-
+        
         if done:
             print('EnergyPlusEnv: (done)')
         return observation, reward, done, {}

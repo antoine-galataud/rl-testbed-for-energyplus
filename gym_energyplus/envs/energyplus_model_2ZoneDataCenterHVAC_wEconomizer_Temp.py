@@ -196,7 +196,7 @@ class EnergyPlusModel2ZoneDataCenterHVAC_wEconomizer_Temp(EnergyPlusModel):
         (self.x_pos, self.x_labels) = self.generate_x_pos_x_labels(date)
 
     def compute_reward(self):
-        self.reward_utils.compute_reward(self)
+        return self.reward_utils.compute_reward(self)
         
     def plot_episode(self, ep):
         self.stats_utils.plot_episode(self, ep, *['tmp'])

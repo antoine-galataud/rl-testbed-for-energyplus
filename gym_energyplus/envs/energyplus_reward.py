@@ -1,11 +1,15 @@
 import numpy as np
+import os
 
 """
 Reward computation functions
 """
 class RewardUtils:
 
-    def compute_reward(self):
+    def compute_reward(self, env):
+        self.raw_state = env.raw_state
+        self.action = env.action
+        self.action_prev = env.action_prev
         rew, _ = self._compute_reward()
         return rew
 
