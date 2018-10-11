@@ -16,6 +16,7 @@ import pandas as pd
 import math
 import json
 from gym_energyplus.envs.energyplus_episode_stats import EpisodeStatsUtils
+from gym_energyplus.envs.energyplus_reward import RewardUtils
 
 class EnergyPlusModel(metaclass=ABCMeta):
 
@@ -40,6 +41,7 @@ class EnergyPlusModel(metaclass=ABCMeta):
         self.reward = None
         self.reward_mean = None
 
+        self.reward_utils = RewardUtils()
         self.stats_utils = EpisodeStatsUtils()
 
     def reset(self):
@@ -154,7 +156,7 @@ class EnergyPlusModel(metaclass=ABCMeta):
             plt.tight_layout()
             plt.show()
 
-    # Show convergence
+    # Show reward convergence
     def show_progress(self):
         self.monitor_file = self.log_dir + '/monitor.csv'
 
