@@ -15,6 +15,7 @@ import matplotlib
 import pandas as pd
 import math
 import json
+from gym_energyplus.envs.energyplus_episode_stats import EpisodeStatsUtils
 
 class EnergyPlusModel(metaclass=ABCMeta):
 
@@ -38,6 +39,8 @@ class EnergyPlusModel(metaclass=ABCMeta):
 
         self.reward = None
         self.reward_mean = None
+
+        self.stats_utils = EpisodeStatsUtils()
 
     def reset(self):
         pass
@@ -97,11 +100,14 @@ class EnergyPlusModel(metaclass=ABCMeta):
         return x_pos, x_labels
 
     def set_action(self, normalized_action):
-        # In TPRO/POP1/POP2 in baseline, action seems to be normalized to [-1.0, 1.0].
+        # In TPRO/PPO1/PPO2 in baseline, action seems to be normalized to [-1.0, 1.0].
         # So it must be scaled back into action_space by the environment.
         self.action_prev = self.action
         self.action = self.action_space.low + (normalized_action + 1.) * 0.5 * (self.action_space.high - self.action_space.low)
         self.action = np.clip(self.action, self.action_space.low, self.action_space.high)
+
+    def get_state(self):
+        return self.format_state(self.raw_state)
 
     @abstractmethod
     def setup_spaces(self): pass
@@ -110,14 +116,17 @@ class EnergyPlusModel(metaclass=ABCMeta):
     @abstractmethod
     def set_raw_state(self, raw_state): pass
 
-    def get_state(self):
-        return self.format_state(self.raw_state)
-
     @abstractmethod
     def compute_reward(self): pass
 
     @abstractmethod
     def format_state(self, raw_state): pass
+
+    @abstractmethod
+    def read_episode(self, ep): pass
+
+    @abstractmethod
+    def plot_episode(self, ep): pass
 
     #--------------------------------------------------
     # Plotting staffs follow
@@ -142,6 +151,7 @@ class EnergyPlusModel(metaclass=ABCMeta):
             plt.rcParams['legend.loc'] = 'lower right'
             self.fig = plt.figure(1, figsize=(16, 10))
             self.plot_episode(csv_file)
+            plt.tight_layout()
             plt.show()
 
     # Show convergence
@@ -282,30 +292,6 @@ class EnergyPlusModel(metaclass=ABCMeta):
             ep += 1
             self.sl_episode.set_val(ep)
 
-    def show_statistics(self, title, series):
-        print('{:25} ave={:5,.2f}, min={:5,.2f}, max={:5,.2f}, std={:5,.2f}'.format(title, np.average(series), np.min(series), np.max(series), np.std(series)))
-
-    def get_statistics(self, series):
-        return np.average(series), np.min(series), np.max(series), np.std(series)
-
-    def show_distrib(self, title, series):
-        dist = [0 for i in range(1000)]
-        for v in series:
-            idx = int(math.floor(v * 10))
-            if idx >= 1000:
-                idx = 999
-            if idx < 0:
-                idx = 0
-            dist[idx] += 1
-        print(title)
-        print('    degree 0.0-0.9 0.0   0.1   0.2   0.3   0.4   0.5   0.6   0.7   0.8   0.9')
-        print('    -------------------------------------------------------------------------')
-        for t in range(170, 280, 10):
-            print('    {:4.1f}C {:5.1%}  '.format(t / 10.0, sum(dist[t:(t+10)]) / len(series)), end='')
-            for tt in range(t, t + 10):
-                print(' {:5.1%}'.format(dist[tt] / len(series)), end='')
-            print('')
-
     def get_episode_list(self, log_dir='', csv_file=''):
         if (log_dir is not '' and csv_file is not '') or (log_dir is '' and csv_file is ''):
             print('Either one of log_dir or csv_file must be specified')
@@ -329,15 +315,59 @@ class EnergyPlusModel(metaclass=ABCMeta):
             self.episode_dirs = [ os.path.dirname(csv_file) ]
             self.num_episodes = len(self.episode_dirs)
 
-    # Model dependent methods
-    @abstractmethod
-    def read_episode(self, ep): pass
+    #--------------------------------------------------
+    # Dump timesteps
+    #--------------------------------------------------
+    def dump_timesteps(self, log_dir='', csv_file='', **kwargs):
+        def rolling_mean(data, size, que):
+            out = []
+            for d in data:
+                que.append(d)
+                if len(que) > size:
+                    que.pop(0)
+                out.append(sum(que) / len(que))
+            return out
+        self.get_episode_list(log_dir=log_dir, csv_file=csv_file)
+        print('{} episodes'.format(self.num_episodes))
+        with open('dump_timesteps.csv', mode='w') as f:
+            tot_num_rec = 0
+            f.write('Sequence,Episode,Sequence in episode,Reward,tz1,tz2,power,Reward(avg1000)\n')
+            que = []
+            for ep in range(self.num_episodes):
+                print('Episode {}'.format(ep))
+                self.read_episode(ep)
+                rewards_avg = rolling_mean(self.rewards, 1000, que)
+                ep_num_rec = 0
+                for rew, tz1, tz2, pow, rew_avg in zip(
+                        self.rewards,
+                        self.df['WEST ZONE:Zone Air Temperature [C](TimeStep)'],
+                        self.df['EAST ZONE:Zone Air Temperature [C](TimeStep)'],
+                        self.df['Whole Building:Facility Total Electric Demand Power [W](Hourly)'],
+                        rewards_avg):
+                    f.write('{},{},{},{},{},{},{},{}\n'.format(tot_num_rec, ep, ep_num_rec, rew, tz1, tz2, pow, rew_avg))
+                    tot_num_rec += 1
+                    ep_num_rec += 1
 
-    @abstractmethod
-    def plot_episode(self, ep): pass
+    #--------------------------------------------------
+    # Dump episodes
+    #--------------------------------------------------
+    def dump_episodes(self, log_dir='', csv_file='', **kwargs):
+        self.get_episode_list(log_dir=log_dir, csv_file=csv_file)
+        print('{} episodes'.format(self.num_episodes))
+        with open('dump_episodes.dat', mode='w') as f:
+            tot_num_rec = 0
+            f.write('#Test Ave1  Min1  Max1 STD1  Ave2  Min2  Max2 STD2   Rew     Power [22,25]1 [22,25]2  Ep\n')
+            for ep in range(self.num_episodes):
+                print('Episode {}'.format(ep))
+                self.read_episode(ep)
+                Temp1 = self.df['WEST ZONE:Zone Air Temperature [C](TimeStep)']
+                Temp2 = self.df['EAST ZONE:Zone Air Temperature [C](TimeStep)']
+                Ave1, Min1, Max1, STD1 = self.get_statistics(Temp1)
+                Ave2, Min2, Max2, STD2 = self.get_statistics(Temp2)
+                In22_24_1 = np.sum((Temp1 >= 22.0) & (Temp1 <= 25.0)) / len(Temp1)
+                In22_25_2 = np.sum((Temp2 >= 22.0) & (Temp2 <= 25.0)) / len(Temp2)
+                Rew, _, _, _ = self.get_statistics(self.rewards)
+                Power, _, _, _ = self.get_statistics(self.df['Whole Building:Facility Total Electric Demand Power [W](Hourly)'])
+                
+                f.write('"{}" {:5.2f} {:5.2f} {:5.2f} {:4.2f} {:5.2f} {:5.2f} {:5.2f} {:4.2f} {:5.2f} {:9.2f} {:8.3%} {:8.3%} {:3d}\n'.format(self.weather_key, Ave1, Min1, Max1, STD1, Ave2,  Min2, Max2, STD2, Rew, Power, In22_25_1, In22_25_2, ep))
 
-    @abstractmethod
-    def dump_timesteps(self, log_dir='', csv_file='', **kwargs): pass
-
-    @abstractmethod
-    def dump_episodes(self, log_dir='', csv_file='', **kwargs): pass
