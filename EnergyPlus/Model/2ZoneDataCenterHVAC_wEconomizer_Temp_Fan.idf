@@ -113,7 +113,7 @@
 
   Version,8.8;
 
-  Timestep,4;
+  Timestep,12;
 
   Building,
     Simple One Zone (Wireframe DXF),  !- Name
