@@ -5,9 +5,8 @@ Helpers for script run_energyplus.py.
 import os
 import gym
 from baselines import logger
-from baselines_energyplus.bench import Monitor
+from baselines_energyplus.common import monitor
 from baselines.common import set_global_seeds
-from baselines.common.atari_wrappers import make_atari, wrap_deepmind
 from baselines.common.vec_env.subproc_vec_env import SubprocVecEnv
 from mpi4py import MPI
 import glob
@@ -17,7 +16,7 @@ def make_energyplus_env(env_id, seed):
     Create a wrapped, monitored gym.Env for EnergyEnv
     """
     env = gym.make(env_id)
-    env = Monitor(env, logger.get_dir())
+    env = monitor.Monitor(env, logger.get_dir())
     env.seed(seed)
     return env
 
